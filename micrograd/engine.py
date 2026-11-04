@@ -1,20 +1,22 @@
 
 class Value:
-    """ stores a single scalar value and its gradient """
+    """Store one scalar value and its gradient."""
 
     def __init__(self, data, _children=(), _op=''):
         self.data = data
         self.grad = 0
-        # internal variables used for autograd graph construction
+        # Each operation fills in its own local derivative for the backward pass.
         self._backward = lambda: None
+        # Keep the inputs and operation so results form a graph we can traverse.
         self._prev = set(_children)
-        self._op = _op # the op that produced this node, for graphviz / debugging / etc
+        self._op = _op
 
     def __add__(self, other):
         other = other if isinstance(other, Value) else Value(other)
         out = Value(self.data + other.data, (self, other), '+')
 
         def _backward():
+            # The derivative of addition is 1 for both inputs; += handles shared inputs.
             self.grad += out.grad
             other.grad += out.grad
         out._backward = _backward
@@ -26,6 +28,7 @@ class Value:
         out = Value(self.data * other.data, (self, other), '*')
 
         def _backward():
+            # Apply the product rule, multiplying by the other input's value.
             self.grad += other.data * out.grad
             other.grad += self.data * out.grad
         out._backward = _backward
@@ -37,6 +40,7 @@ class Value:
         out = Value(self.data**other, (self,), f'**{other}')
 
         def _backward():
+            # Power rule: d(x**n)/dx = n*x**(n-1).
             self.grad += (other * self.data**(other-1)) * out.grad
         out._backward = _backward
 
@@ -46,16 +50,17 @@ class Value:
         out = Value(0 if self.data < 0 else self.data, (self,), 'ReLU')
 
         def _backward():
+            # ReLU blocks gradients on its inactive (negative) side.
             self.grad += (out.data > 0) * out.grad
         out._backward = _backward
 
         return out
 
     def backward(self):
-
-        # topological order all of the children in the graph
+        # Visit inputs before results, so reverse order processes results first.
         topo = []
         visited = set()
+
         def build_topo(v):
             if v not in visited:
                 visited.add(v)
@@ -64,7 +69,7 @@ class Value:
                 topo.append(v)
         build_topo(self)
 
-        # go one variable at a time and apply the chain rule to get its gradient
+        # Seed the output derivative; each node then propagates it to its inputs.
         self.grad = 1
         for v in reversed(topo):
             v._backward()
